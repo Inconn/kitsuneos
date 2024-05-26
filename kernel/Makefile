@@ -14,6 +14,7 @@ include $(ARCHDIR)/make.config
 KERNEL_OBJS:=\
 	     $(KERNEL_ARCH_OBJS)\
 	     kernel/kernel.o\
+	     kernel/buddy.o\
 
 CRTI_OBJ=$(ARCHDIR)/crti.o
 CRTBEGIN_OBJ:=$(shell $(CC) $(CFLAGS) -print-file-name=crtbegin.o)
