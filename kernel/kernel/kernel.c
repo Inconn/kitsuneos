@@ -1,12 +1,28 @@
+#include <kernel/arch.h>
 #include <kernel/tty.h>
 #include <kernel/buddy.h>
 
-void kernel_main(void) {
+#include <stdint.h>
+#include <stdlib.h>
+
+extern uint32_t kernel_end;
+
+void kernel_main(uint32_t mboot_magic, void* mboot_header) {
 	terminal_initialize();
-	initialize_buddy_allocator();
+
+	struct buddy_allocator* b = (struct buddy_allocator*)kernel_end;
+
+	void* data = (void*)(kernel_end + (4096 - (kernel_end % 4096)));
+
+	if (buddy_initialize_allocator(b, data, 1073741824, 4096) != 0) {
+		terminal_writestring("couldn't init buddy allocator\n");
+		abort();
+	}
+	
+	arch_init_kernel();
 	terminal_writestring("welcome to kitsuneOS!\nthis is all it does right now...\n");
 
-	char* allocated = (char*)buddy_allocate(40);
+	char* allocated = (char*)buddy_allocate(b, 40);
 
 	allocated = "this is a buddy allocated string\n\0";
 
