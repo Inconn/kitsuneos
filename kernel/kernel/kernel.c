@@ -1,6 +1,8 @@
 #include <kernel/arch.h>
 #include <kernel/tty.h>
 #include <kernel/buddy.h>
+#include <kernel/context_switching.h>
+#include <kernel/test_user_fn.h>
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -28,4 +30,10 @@ void kernel_main(uint32_t mboot_magic, void* mboot_header) {
 
 	//terminal_writestring(allocated);
 	terminal_writestring("wow!\n");
+
+	/*for (;;) {
+		asm volatile("hlt;");
+	}*/
+
+	//switch_context(&test_user_fn);
 }

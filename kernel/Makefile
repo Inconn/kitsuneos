@@ -15,6 +15,7 @@ KERNEL_OBJS:=\
 	     $(KERNEL_ARCH_OBJS)\
 	     kernel/kernel.o\
 	     kernel/buddy.o\
+	     kernel/test_user_fn.o\
 
 CRTI_OBJ=$(ARCHDIR)/crti.o
 CRTBEGIN_OBJ:=$(shell $(CC) $(CFLAGS) -print-file-name=crtbegin.o)

@@ -12,14 +12,16 @@
 
 .section .stack_bootstrap
 .align 16
+.global stack_bottom
 stack_bottom:
 .skip 16384
+.global stack_top
 stack_top:
 
 .section .bss, "aw", @nobits
 .align 4096
-.global _boot_page_directory
-_boot_page_directory:
+.global _kernel_page_directory
+_kernel_page_directory:
 .skip 4096
 .global _boot_page_table1
 _boot_page_table1:
@@ -60,10 +62,10 @@ _start:
 3:
 	movl $(0x000B8000 | 0x003), _boot_page_table1 - 0xC0000000 + 1023 * 4
 
-	movl $(_boot_page_table1 - 0xC0000000 + 0x003), _boot_page_directory - 0xC0000000 + 0
-	movl $(_boot_page_table1 - 0xC0000000 + 0x003), _boot_page_directory - 0xC0000000 + 768 * 4
+	movl $(_boot_page_table1 - 0xC0000000 + 0x003), _kernel_page_directory - 0xC0000000 + 0
+	movl $(_boot_page_table1 - 0xC0000000 + 0x003), _kernel_page_directory - 0xC0000000 + 768 * 4
 
-	movl $(_boot_page_directory - 0xC0000000), %ecx
+	movl $(_kernel_page_directory - 0xC0000000), %ecx
 	movl %ecx, %cr3
 
 	movl %cr0, %ecx
@@ -76,7 +78,7 @@ _start:
 .section .text
 
 4:
-	movl $0, _boot_page_directory + 0
+	movl $0, _kernel_page_directory + 0
 
 	movl %cr3, %ecx
 	movl %ecx, %cr3
