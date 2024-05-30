@@ -1,22 +1,31 @@
 #ifndef KERNEL_BUDDY_H
 #define KERNEL_BUDDY_H
 
-#include <stddef.h>
 #include <stdbool.h>
 
-struct buddy_block {
-	size_t size;
+#define BUDDY_MIN_ORDER 12
+#define BUDDY_MAX_ORDER 19
+
+struct double_linked_list {
+	struct double_linked_list* prev;
+	struct double_linked_list* next;
+	void* data;
+}
+
+struct buddy_block_metadata {
 	bool is_free;
-};
+	uint8_t order;
+}
+typedef struct buddy_metadata_block buddy_block_metadata_t;
 
 struct buddy_allocator {
-	struct buddy_block* head;
-	struct buddy_block* tail;
-	size_t alignment;
-};
+	buddy_block_metadata_t* physical_page_metadata;
+	void* memory_block;
+	struct double_linked_list** freelists;
+	uint32_t size;
+}
+typedef struct buddy_allocator buddy_allocator_t;
 
-int buddy_initialize_allocator(struct buddy_allocator* buddy_allocator, void* data, size_t size, size_t alignment);
-void* buddy_allocate(struct buddy_allocator* buddy_allocator, size_t size);
-void buddy_allocator_free(struct buddy_allocator* buddy_allocator, void* data);
+int buddy_init_allocator(buddy_allocator_t* allocator, buddy_block_metadata_t* metadata_block, void* memory_block, uint32_t physical_page_count);
 
 #endif

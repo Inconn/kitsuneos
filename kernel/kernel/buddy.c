@@ -1,179 +1,268 @@
-#include <stddef.h>
-#include <stdint.h>
+#include <kernel/buddy2.h>
+
 #include <stdbool.h>
+#include <string.h>
 
-#include <kernel/buddy.h>
-
-struct buddy_block* buddy_next_buddy(struct buddy_block* block) {
-	return (struct buddy_block*)((char*)block + block->size);
-}
-
-int buddy_initialize_allocator(struct buddy_allocator* buddy_allocator, void* data, size_t size, size_t alignment) {
-	if (data == NULL)
+int buddy_init_allocator(buddy_allocator_t* allocator, void* bookkeeping_block, uint32_t bookkeeping_size, void* memory_block, uint32_t size) {
+	// makes no sense to have a size of zero
+	if (size == 0)
 		return -1;
-	if (size == 0 || (size & (size - 1)) != 0)
-		return -2;
-	if (alignment == 0 || (alignment & (alignment - 1)) != 0)
-		return -3;
 
-	while (alignment < sizeof(struct buddy_block)) {
-		alignment <<= 1;
+	//
+	uint32_t order = 30 - __builtin_clz(size);
+	if (physical_page_count % (MAX_ORDER - MIN_ORDER + 1) != 0)
+		return -1;
+
+	uint32_t metadata_size = sizeof(buddy_block_metadata_t) * physical_page_count;
+	
+	struct double_linked_list* freelists_block = (struct double_linked_list*)(allocator->freelists + (sizeof(struct double_linked_list*) * (MAX_ORDER - MIN_ORDER + 1)))
+
+	struct double_linked_list** freelists[MAX_ORDER - MIN_ORDER + 1];
+	uint32_t size_summation = 0;
+	for (uint32_t i = 0; i < (MAX_ORDER - MIN_ORDER); i++) {
+		freelists[i] = freelists_block + size_summation;
+
+		uint32_t max_list_count = (physical_page_count >> i);
+		size_summation += max_list_count * sizeof(struct double_linked_list);
 	}
 
-	if ((uintptr_t)data % alignment != 0)
-		return -4;
+	// not enough memory allocated to keep track of our data
+	if ((metadata_size + size_summation) < bookkeeping_size)
+		return -1;
 
-//	head = (void*)(end_kernel + (buddy_allocator->alignment - (end_kernel % buddy_allocator->alignment)));
+	allocator->physical_page_metadata = bookkeeping_block;
+	allocator->memory_block = memory_block;
+	allocator->freelists = bookkeeping_block + metadata_size;
+	allocator->size = size;
 
-	buddy_allocator->head = (struct buddy_block*) data;
-	buddy_allocator->head->size = size;
-	buddy_allocator->head->is_free = true;
+	memcpy(&allocator->freelists, freelists, (sizeof(struct double_linked_list*) * (MAX_ORDER - MIN_ORDER + 1)));
 
-	buddy_allocator->tail = buddy_next_buddy(buddy_allocator->head);
+	for (uint32_t i = 0; i < (MAX_ORDER - MIN_ORDER); i++) {
+		allocator->freelists[i][0].prev = NULL;
+		allocator->freelists[i][0].next = NULL;
+	}
 
-	buddy_allocator->alignment = alignment;
+	for (uint32_t i = 0; i < allocator->page_count; i++) {
+		allocator->physical_page_metadata[i].is_free = true;
+
+		for (uint32_t j = 0; j < (MAX_ORDER - MIN_ORDER) j++;) {
+			if ((i % (j + 1)) == 0) {
+				allocator->physical_page_metadata[i] = (MIN_ORDER + j);
+				if (j == (MAX_ORDER - MIN_ORDER)) {
+					uint32_t index = i / (j + 1);
+
+					struct double_linked_list* current_list = &allocator->freelists[MAX_ORDER - MIN_ORDER - 1][index];
+
+					current_list->prev = 0xDEADBEEF;
+					current_list->next = NULL;
+					current_list->data = allocator->memory_block + ((1 << MAX_ORDER) * index);
+					if (index != 0) {
+						struct double_linked_list* last_list = &allocator->freelists[MAX_ORDER - MIN_ORDER - 1][index - 1];
+
+						current_list->prev = last_list;
+						last_list->next = current_list;
+					}
+				}
+			}
+		}
+	}
+	/*for (uint32_t i = 0; i < (allocator->page_count >> (MAX_ORDER - MIN_ORDER - 1)); i++) {
+	}*/
 
 	return 0;
 }
 
-size_t buddy_required_size(struct buddy_allocator* buddy_allocator, size_t size) {
-	size_t actual_size = buddy_allocator->alignment;
+void* buddy_allocate(buddy_allocator_t allocator, uint32_t size) {
+	// doesn't make sense to ask for an allocation of size 0
+	// also means we can use __builtin_clz without undefined behavior
+	if (size == 0)
+		return NULL;
 
-	size += sizeof(struct buddy_block);
-	size += (buddy_allocator->alignment - (size % buddy_allocator->alignment));
+	uint32_t required_order = 30 - __builtin_clz(size);
 
-	while (size > actual_size) {
-		actual_size <<= 1;
+	// too big to give out as one allocation
+	if (required_order > MAX_ORDER)
+		return NULL;
+
+	// if they're requesting memory too small for us to give out, just give the smallest we can.
+	if (required_order < MIN_ORDER)
+		required_order = MIN_ORDER;
+
+	// freelist item that corresponds to the free block we're going to use for the allocation
+	struct double_linked_list* list = NULL;
+
+	uint32_t order = required_order - MIN_ORDER;
+	uint32_t index = 0;
+
+	// find out if there's any memory available that can fulfill this allocation request.
+	for (; order <= (MAX_ORDER - MIN_ORDER); order++) {
+		struct double_linked_list* list_to_check = &allocator->freelists[order][0];
+		if (list_to_check.prev != NULL || list_to_check.next != NULL)
+			break;
 	}
+
+	// if this happens, there's no more memory available that can fulfill this allocation request.
+	if (order > (MAX_ORDER - MIN_ORDER))
+		return NULL;
+
+	// loop over the freelist until we get to the last one.
+	for (; list == NULL; i++) {
+		struct double_linked_list* list_to_check = &allocator->freelists[order][index];
 	
-	return actual_size;
+		if (list_to_check->next == NULL)
+			list = &list_to_check;
+	}
+
+	// shouldn't be possible for this to happen, but we'll check anyways
+	if (list == NULL)
+		return NULL;
+	
+	// i set the prev field to 0xDEADBEEF if the block is the first list in the linked list and it exists
+	// but obviously that's not actually a pointer to a list, so we have to filter that out
+	if (list->prev != 0xDEADBEEF)
+		list->prev->next = list->next;
+
+	list->prev = NULL;
+
+	while (order < required_order) {
+		order--;
+		index <<= 2;
+
+		struct double_linked_list* first_list = &allocator->freelists[order][index];
+		first_list->data = allocator->memory_block + ((1 << order) * index);
+		first_list->prev = NULL;
+		first_list->next = NULL;
+		if (index == 0) {
+			first_list->prev = 0xDEADBEEF;
+		} else {
+			allocator->freelists[order][0].next = first_list;
+		}
+
+		list = &allocator->freelists[order][index + 1];
+
+		index++;
+	}
+
+	list->data = allocator->memory_block + ((1 << order) * index);
+	return list->data;
 }
 
+int buddy_free(buddy_allocator_t allocator, void* memory_to_free) {
+	if (memory_to_free < allocator->memory_block || memory_to_free > (allocator->memory_block + allocator->size))
+		// this isn't memory that we manage, we can't do anything with this.
+		return -1;
 
-void buddy_coalescence(struct buddy_allocator* buddy_allocator) {
-	for (;;) {
-		struct buddy_block* block = buddy_allocator->head;
-		struct buddy_block* buddy = buddy_next_buddy(block);
+	if (memory_to_free % (1 << MIN_ORDER) != 0)
+		// memory isn't aligned properly so we can't free it properly
+		return -1;
 
-		bool no_coalescence = true;
-		while (block < buddy_allocator->tail && buddy < buddy_allocator->tail) {
-			if (block ->is_free && buddy->is_free && block->size == buddy->size) {
-				block->size <<= 1;
-				block = buddy_next_buddy(block);
-				if (block < buddy_allocator->tail) {
-					buddy = buddy_next_buddy(block);
-					no_coalescence = false;
-				}
-			} else if (block->size < buddy->size) {
-				block = buddy;
-				buddy = buddy_next_buddy(buddy);
+	uint32_t page_index = ((allocator->memory_block - memory_to_free) >> MIN_ORDER);
+	if (allocator->physical_page_metadata[page_index].is_free == true)
+		// this memory has already been freed.
+		return -1;
+
+	uint32_t order = allocator->physical_page_metadata[physical_page_index]->order;
+	uint32_t index = (page_index >> (order - MIN_ORDER));
+
+	struct double_linked_list* order_freelist = allocator->freelists[order];
+	struct double_linked_list* memory_llist = &order_freelist[index];
+
+	memory_llist->data = memory_to_free;
+
+	if (memory_llist != order_freelist) {
+		if (order_freelist[0].next != NULL) {
+			if (order_freelist[0].next > memory_llist) {
+				memory_llist->prev = NULL;
+				if (order_freelist[0].prev == 0xDEADBEEF)
+					memory_llist->prev = &order_freelist[0];
+				memory_llist->next = order_freelist[0].next;
+
+				order_freelist[0].next->prev = memory_llist;
+				order_freelist[0].next = memory_llist;
 			} else {
-				block = buddy_next_buddy(buddy);
-				if (block < buddy_allocator->tail) {
-					buddy = buddy_next_buddy(block);
+				struct double_linked_list* llist = order_freelist[0].next;
+				bool all_lower = false;
+
+				while (llist < memory_llist && !all_lower) {
+					llist = llist->next;
+					all_lower = (llist->next == NULL);
 				}
-			}
-		}
 
-		if (no_coalescence) {
-			return;
-		}
-	}
-}
+				if (all_lower) {
+					llist->next = memory_llist;
+					memory_llist->next = NULL;
+				} else {
+					memory_llist->prev = llist->prev;
+					memory_llist->next = llist;
 
-struct buddy_block* buddy_block_split(struct buddy_block* block, size_t size) {
-	if (block != NULL && size != 0) {
-		while (size < block->size) {
-			size_t sz = block->size >> 1;
-			block->size = sz;
-			block = buddy_next_buddy(block);
-			block->size = sz;
-			block->is_free = true;
-		}
-
-		if (size <= block->size) {
-			return block;
-		}
-	}
-
-	return NULL;
-}
-
-struct buddy_block* buddy_find_best_block(struct buddy_allocator* buddy_allocator, size_t size) {
-	struct buddy_block* best_block = NULL;
-	struct buddy_block* block = buddy_allocator->head;
-	struct buddy_block* buddy = buddy_next_buddy(block);
-
-	if (buddy == buddy_allocator->tail && block->is_free) {
-		return buddy_block_split(block, size);
-	}
-
-	while (block < buddy_allocator->tail && buddy < buddy_allocator->tail) {
-		if (block->is_free && buddy->is_free && block->size == buddy->size) {
-			block->size <<= 1;
-			if (size <= block->size && (best_block == NULL || block->size <= best_block->size)) {
-				best_block = block;
-			}
-
-			block = buddy_next_buddy(buddy);
-			if (block < buddy_allocator->tail) {
-				buddy = buddy_next_buddy(block);
-			}
-			continue;
-		}
-
-		if (block->is_free && size <= block->size && (best_block == NULL || block->size <= best_block->size)) {
-			best_block = block;
-		}
-
-		if (buddy->is_free && size <= buddy->size && (best_block == NULL || buddy->size < best_block->size)) {
-			best_block = buddy;
-		}
-
-		if (block->size <= buddy->size) {
-			block = buddy_next_buddy(buddy);
-			if (block < buddy_allocator->tail) {
-				buddy = buddy_next_buddy(block);
+					llist->prev->next = memory_llist;
+					llist->prev = memory_llist;
+				}
 			}
 		} else {
-			block = buddy;
-			buddy = buddy_next_buddy(buddy);
+			order_freelist[0].next = memory_llist;
+
 		}
+	} else {
+		memory_llist->prev = 0xDEADBEEF;
 	}
 
-	if (best_block != NULL) {
-		return buddy_block_split(best_block, size);
-	}
+	while (order < MAX_ORDER) {
+		page_index -= (page_index % (order << 1));
+		if !(allocator->physical_page_metadata[page_index].is_free && allocator->physical_page_metadata[page_index + 1].is_free && (allocator->physical_page_metadata[page_index].order == order) && (allocator->physical_page_metadata[page_index + 1].order == order))
+			break;
 
-	return NULL;
-}
+		index = (page_index >> (order - MIN_ORDER));
+		struct double_linked_list* first_list = &allocator->freelists[order][index];
+		struct double_linked_list* second_list = &allocator->freelists[order][index + 1];
 
-void* buddy_allocate(struct buddy_allocator* buddy_allocator, size_t size) {
-	if (size != 0) {
-		size_t required_size = buddy_required_size(buddy_allocator, size);
-
-		struct buddy_block* found = buddy_find_best_block(buddy_allocator, required_size);
-		if (found == NULL) {
-			buddy_coalescence(buddy_allocator);
-			found = buddy_find_best_block(buddy_allocator, required_size);
+		if (first_list == allocator->freelists[order]) {
+			second_list->next->prev = NULL;
+			first_list->next = second_list->next;
+		}
+		else {
+			if (first_list->prev != NULL)
+				first_list->prev->next = second_list->next;
+			if (second_list->next != NULL)
+				second_list->next->prev = first_list->prev;
 		}
 
-		if (found != NULL) {
-			found->is_free = false;
-			return (void*)((char*)found + buddy_allocator->alignment);
+		struct double_linked_list* list = &allocator->freelists[order][index];
+
+		if (list == allocator->freelists[order]) {
+			list->prev = 0xDEADBEEF;
+		} else if (allocator->freelists[order].next == NULL) {
+			allocator->freelists[order]->next = list;
+			if (allocator->freelists[order]->prev == 0xDEADBEEF)
+				list->prev = allocator->freelists[order];
+		} else if (allocator->freelists[order].next > list) {
+			list->next = allocator->freelists[order]->next;
+			allocator->freelists[order]->next = list;
+			if (allocator->freelists[order]->prev == 0xDEADBEEF)
+				list->prev = allocator->freelists[order];
+		} else {
+			struct double_linked_list* llist = order_freelist[0].next;
+			bool all_lower = false;
+
+			while (llist < list && !all_lower) {
+				llist = llist->next;
+				all_lower = (llist->next == NULL);
+			}
+
+			if (all_lower) {
+				llist->next = list;
+				list->next = NULL;
+			} else {
+				list->prev = llist->prev;
+				list->next = llist;
+
+				llist->prev->next = list;
+				llist->prev = list;
+			}
 		}
+
+		order--;
 	}
 
-	return NULL;
-}
-
-void buddy_allocator_free(struct buddy_allocator* buddy_allocator, void* data) {
-	if (data != NULL) {
-		struct buddy_block* block;
-
-		if (buddy_allocator->head <= data && data < buddy_allocator->tail) {
-			block = (struct buddy_block*)data - buddy_allocator->alignment;
-			block->is_free = true;
-		}
-	}
+	return 0;
 }
