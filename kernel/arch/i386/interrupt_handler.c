@@ -1,4 +1,5 @@
-__attribute__((noreturn))
+#include <stdlib.h>
+
 void exception_handler() {
-	asm volatile("cli; hlt");
+	abort();
 }

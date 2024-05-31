@@ -60,7 +60,7 @@ _start:
 	addl $4, %edi
 	loop 1b
 3:
-	movl $(0x000B8000 | 0x003), _boot_page_table1 - 0xC0000000 + 1023 * 4
+	movl $(0x000B8000 | 0x003), _boot_page_table1 - 0xC0000000 + 0 * 4
 
 	movl $(_boot_page_table1 - 0xC0000000 + 0x003), _kernel_page_directory - 0xC0000000 + 0
 	movl $(_boot_page_table1 - 0xC0000000 + 0x003), _kernel_page_directory - 0xC0000000 + 768 * 4
