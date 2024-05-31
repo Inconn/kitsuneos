@@ -1,3 +1,5 @@
+// FIXME: the algorithm used here sucks ass i think
+
 #include <kernel/buddy.h>
 
 #include <stdbool.h>
@@ -20,19 +22,19 @@ int buddy_init_allocator(buddy_allocator_t* allocator, void* bookkeeping_block, 
 
 	uint32_t metadata_size = sizeof(buddy_block_metadata_t) * page_count;
 	
-	struct double_linked_list* freelists_block = (struct double_linked_list*)(allocator->freelists + (sizeof(struct double_linked_list*) * (BUDDY_MAX_ORDER - BUDDY_MIN_ORDER + 1)));
+	struct double_linked_list* freelists_block = (struct double_linked_list*)((uint32_t)bookkeeping_block + metadata_size + (sizeof(struct double_linked_list*) * (BUDDY_MAX_ORDER - BUDDY_MIN_ORDER)));
 
-	struct double_linked_list* freelists[BUDDY_MAX_ORDER - BUDDY_MIN_ORDER + 1];
+	struct double_linked_list* freelists[BUDDY_MAX_ORDER - BUDDY_MIN_ORDER];
 	uint32_t size_summation = 0;
 	for (uint32_t i = 0; i < (BUDDY_MAX_ORDER - BUDDY_MIN_ORDER); i++) {
-		freelists[i] = freelists_block + size_summation;
+		freelists[i] = (struct double_linked_list*)((uint32_t)freelists_block + size_summation);
 
 		uint32_t max_list_count = (page_count >> i);
 		size_summation += max_list_count * sizeof(struct double_linked_list);
 	}
 
 	// not enough memory allocated to keep track of our data
-	if ((metadata_size + size_summation) < bookkeeping_size)
+	if ((metadata_size + size_summation) > bookkeeping_size)
 		return -1;
 
 	allocator->physical_page_metadata = bookkeeping_block;
@@ -40,7 +42,7 @@ int buddy_init_allocator(buddy_allocator_t* allocator, void* bookkeeping_block, 
 	allocator->freelists = bookkeeping_block + metadata_size;
 	allocator->size = size;
 
-	memcpy(&allocator->freelists, freelists, (sizeof(struct double_linked_list*) * (BUDDY_MAX_ORDER - BUDDY_MIN_ORDER + 1)));
+	memcpy(allocator->freelists, freelists, (sizeof(struct double_linked_list*) * (BUDDY_MAX_ORDER - BUDDY_MIN_ORDER + 1)));
 
 	for (uint32_t i = 0; i < (BUDDY_MAX_ORDER - BUDDY_MIN_ORDER); i++) {
 		allocator->freelists[i][0].prev = NULL;
